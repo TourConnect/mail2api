@@ -26,7 +26,16 @@ app.get('/', (req, res) => {
     openInbox(function(err, box) {
       if (err) throw err;
       imap.search([ 'ALL', ['SINCE', (new Date()).addHours(-1)] ], function(err, results) {
-        if (err) throw err;
+        if (err){
+          console.log(err)
+          imap.end();
+          return
+        }
+        console.log(`${results.length} messages found !`);
+        if (results.length === 0){
+          imap.end();
+          return
+        }
         var f = imap.fetch(results, { bodies: '' });
         f.on('message', function(msg, seqno) {
           console.log('Message #%d', seqno);
@@ -67,9 +76,8 @@ app.get('/', (req, res) => {
         f.once('end', function() {
           console.log('Done fetching all messages!');
           imap.end();
-
         });
-      });
+      })
     });
   });
 
