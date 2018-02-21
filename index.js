@@ -16,11 +16,12 @@ Date.prototype.addHours = function(h) {
    return this;
 }
 
-app.get('/', (req, res) => {
+app.get('/:touserid', (req, res) => {
+  //console.log(req.params.touserid)
   const retval = []
   const imap = new Imap(settings);
   function openInbox(cb) {
-    imap.openBox('INBOX', true, cb);
+    imap.openBox('INBOX', false, cb);
   }
   imap.once('ready', function() {
     openInbox(function(err, box) {
@@ -38,6 +39,7 @@ app.get('/', (req, res) => {
         }
         var f = imap.fetch(results, { bodies: '' });
         f.on('message', function(msg, seqno) {
+          let msgUid = 0
           console.log('Message #%d', seqno);
           var prefix = '(#' + seqno + ') ';
           msg.on('body', function(stream, info) {
@@ -50,21 +52,23 @@ app.get('/', (req, res) => {
               //console.log(buffer)
               simpleParser(buffer, (err, mail)=>{
                 if(err) console.log(err)
-                const toPush = {
-                  to: mail.to.text,
-                  subject: mail.subject,
-                  body: mail.html
+                if (mail.to.text === req.params.touserid){
+                  const toPush = {
+                    to: mail.to.text,
+                    subject: mail.subject,
+                    body: mail.html,
+                    msgUid: msgUid
+                  }
+                  console.log(`${toPush.msgUid} | <${toPush.to}>: ${toPush.subject}`)
+                  retval.push(toPush)
                 }
-                console.log(`<${toPush.to}>${toPush.subject}`)
-                retval.push(toPush)
               })
-
-              // console.log(prefix + 'Parsed header: %s', inspect(Imap.parseHeader(buffer)));
-            });
-          });
+            })
+          })
 
           msg.once('attributes', function(attrs) {
-            console.log(prefix + 'Attributes: %s', inspect(attrs, false, 8));
+            // console.log(prefix + 'Attributes: %s', inspect(attrs, false, 8));
+            msgUid = attrs.uid
           });
           msg.once('end', function() {
             console.log(prefix + 'Finished');
@@ -75,7 +79,7 @@ app.get('/', (req, res) => {
         });
         f.once('end', function() {
           console.log('Done fetching all messages!');
-          imap.end();
+          imap.end()
         });
       })
     });
@@ -87,12 +91,40 @@ app.get('/', (req, res) => {
 
   imap.once('end', function() {
     console.log('Connection ended');
-    res.json(retval);
+    toDelete = retval.map(e => e.msgUid)
+    deleteMessages(toDelete, () => {
+      res.json(retval);
+    })
   });
-
   imap.connect();
-  //res.send('Hello World!')
 })
+
+const deleteMessages = function(toDelete, next){
+  const imap = new Imap(settings);
+  function openInbox(cb) {
+    imap.openBox('INBOX', false, cb);
+  }
+  imap.once('ready', function() {
+    openInbox(function(err, box) {
+      console.log('Deleting', toDelete)
+      if (toDelete.length > 0){
+        imap.addFlags(toDelete, 'Deleted', function(err) {
+          console.log('deletion error', err)
+          if (err) return cb(err);
+          imap.closeBox(function(err) {
+            imap.end();
+          })
+        })
+      }else{
+        imap.end();
+      }
+    })
+  })
+  imap.once('end', function() {
+    next()
+  })
+  imap.connect();
+}
 
 app.listen(3000, () => {
   console.log('Example app listening on port 3000!')
